@@ -10,9 +10,19 @@ import time
 # CYCLE_C = 7
 # CYCLE_CC = 8
 # DUPLICATE = 9
+# TRASH = 10
 OFFSETS = [(0, -1), (1, 0), (0, 1), (-1, 0)]
 CYCLES = [(1, 2), (3, 1), (0, 3), (1, 0)]
 CYCLES_CC = [(3, 2), (1, 2), (1, 0), (3, 0)]
+TRANSPARENT = [10]
+
+def str_matrix(board):
+    string = ""
+    for row in board:
+        for cell in row:
+            string += str(cell) + " "
+        string += "\n"
+    return string
 
 class Cell:
     def __init__(self, celltype, rotation):
@@ -28,46 +38,93 @@ class Cell:
         match self.celltype:
             case 2: return direction % 2 == self.rotation % 2
             case 3: return False
+            case 10: return True
+            case _: return True
+
+    def effect(self, cell, board):
+        match self.celltype:
+            case 10:
+                board[cell.y][cell.x] = Cell(0, 0)
+                board[cell.y][cell.x].x, board[cell.y][cell.x].y = cell.x, cell.y
+
+    def replaceable(self, direction):
+        match self.celltype:
+            case 2: return direction % 2 == self.rotation % 2
+            case 3: return False
+            case 10: return False
             case _: return True
 
     def run(self, board):
         (offset_x, offset_y) = OFFSETS[self.rotation]
         beside_x, beside_y = self.x + offset_x, self.y + offset_y
         beside = board[beside_y][beside_x]
-        
+
         surroundings = [board[self.y + OFFSETS[i][1]][self.x + OFFSETS[i][0]] for i in range(4)]
-        surroundings_x = [self.x + OFFSETS[i][0] for i in range(4)]
-        surroundings_y = [self.y + OFFSETS[i][1] for i in range(4)]
-        
+        surroundings_pos = [(cell.x, cell.y) for cell in surroundings]
+
         match self.celltype:
             case 4:
                 if beside.movable(self.rotation):
-                    print("MOVE")
-                    board[self.y][self.x] = beside
-                    
-                    beside.x, self.x = self.x, beside.x
-                    beside.y, self.y = self.y, beside.y
-                    
-                    board[beside_y][beside_x] = self
+                    if beside.celltype not in TRANSPARENT:
+                        board[self.y][self.x] = beside
+
+                        beside.x, self.x = self.x, beside_x
+                        beside.y, self.y = self.y, beside_y
+
+                        board[beside_y][beside_x] = self
+                    else: beside.effect(self, board)
             case 5:
                 for cell in surroundings: cell.rotation = (cell.rotation + 1) % 4
             case 6:
                 for cell in surroundings: cell.rotation = (cell.rotation - 1) % 4
             case 7:
-                if all([cell.movable(CYCLES[i][0]) and cell.movable(CYCLES[i][1]) for i, cell in enumerate(surroundings)]):
+                if all([cell.movable(CYCLES[i][0]) and \
+                        cell.movable(CYCLES[i][1]) for i, cell in enumerate(surroundings)]):
+                    prev_move = surroundings[-1].celltype not in TRANSPARENT
+                    transparents = []
+                    
                     for i, cell in enumerate(surroundings):
-                        cell.rotation = (cell.rotation + 1) % 4
-                        board[surroundings_y[(i + 1) % 4]][surroundings_x[(i + 1) % 4]] = cell
-                        cell.x, cell.y = surroundings_x[(i + 1) % 4], surroundings_y[(i + 1) % 4]
+                        if prev_move: cell.effect(surroundings[i - 1], board)
+                        prev_move = cell.celltype not in TRANSPARENT
+                        transparents.append(not prev_move)
+                        
+                    for i, cell in enumerate(surroundings):
+                        if not transparents[i] and not transparents[(i + 1) % 4]:
+                            cell.rotation = (cell.rotation + 1) % 4
+                            board[surroundings_pos[(i + 1) % 4][1]][surroundings_pos[(i + 1) % 4][0]] = cell
+                            
+                            if transparents[i - 1]:
+                                board[cell.y][cell.x] = Cell(0, 0)
+                                board[cell.y][cell.x].x, board[cell.y][cell.x].y = cell.x, cell.y
+                                
+                            (cell.x, cell.y) = surroundings_pos[(i + 1) % 4]
             case 8:
-                if all([cell.movable(CYCLES_CC[i][0]) and cell.movable(CYCLES_CC[i][1]) for i, cell in enumerate(surroundings)]):
-                    for i, cell in enumerate(surroundings):
-                        cell.rotation = (cell.rotation - 1) % 4
-                        board[surroundings_y[(i - 1) % 4]][surroundings_x[(i - 1) % 4]] = cell
-                        cell.x, cell.y = surroundings_x[(i - 1) % 4], surroundings_y[(i - 1) % 4]
+                if all([cell.movable(CYCLES_CC[i][0]) and \
+                        cell.movable(CYCLES_CC[i][1]) for i, cell in enumerate(surroundings)]):
+                            prev_move = surroundings[0].celltype not in TRANSPARENT
+                            transparents = []
+
+                            for i, cell in reversed(list(enumerate(surroundings))):
+                                if prev_move: cell.effect(surroundings[(i + 1) % 4], board)
+                                prev_move = cell.celltype not in TRANSPARENT
+                                transparents.append(not prev_move)
+
+                            transparents = list(reversed(transparents))
+                            
+                            for i, cell in enumerate(surroundings):
+                                if not transparents[i] and not transparents[i - 1]:
+                                    cell.rotation = (cell.rotation - 1) % 4
+                                    board[surroundings_pos[i - 1][1]][surroundings_pos[i - 1][0]] = cell
+
+                                    if transparents[(i + 1) % 4]:
+                                        board[cell.y][cell.x] = Cell(0, 0)
+                                        board[cell.y][cell.x].x, board[cell.y][cell.x].y = cell.x, cell.y
+
+                                    (cell.x, cell.y) = surroundings_pos[i - 1]
             case 9:
-                board[beside_y][beside_x] = surroundings[(self.rotation + 2) % 4].copy()
-                board[beside_y][beside_x].x, board[beside_y][beside_x].y = beside_x, beside_y
+                if board[beside_y][beside_x].replaceable(self.rotation):
+                    board[beside_y][beside_x] = surroundings[(self.rotation + 2) % 4].copy()
+                    board[beside_y][beside_x].x, board[beside_y][beside_x].y = beside_x, beside_y
 
 
     def __repr__(self):
@@ -113,34 +170,31 @@ class Board:
 
     def __repr__(self):
         return str(self)
-        
+
     def __str__(self):
-        string = ""
-        for row in self.cells:
-            for cell in row:
-                string += str(cell) + " "
-            string += "\n"
-        return string
+        return str_matrix(self.cells)
 
 board = Board([
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 5, 0],
-    [0, 0, 0, 0, 7, 0, 9, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 4, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 10, 0, 0, 0, 0, 0, 5],
+    [4, 0, 0, 2, 0, 0, 0, 7, 0, 0, 10],
+    [0, 0, 0, 0, 0, 9, 0, 0, 8, 0, 0],
+    [0, 0, 0, 6, 6, 0, 0, 0, 0, 0, 0]
 ], [
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 2, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 ])
 
+print(board)
+input("Press Enter to Run")
 while True:
-    print(board)
     board.run()
-    time.sleep(0.2)
+    print(board)
+    input("Press Enter to continue")
